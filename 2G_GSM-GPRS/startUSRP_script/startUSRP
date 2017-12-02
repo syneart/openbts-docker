@@ -1,0 +1,91 @@
+#!/bin/bash
+
+### Asterisk config in
+# /etc/asterisk/
+
+
+function print_help() {
+        echo "-V        Show DEBUG record and log to file"
+        echo "-GPRS     Enable GPRS this time"
+        echo "-h        Help"
+        echo "-custom   Some value for recommend, e.g Control.LUR.OpenRegistration, TRX.Reference, some GPRS settiing"
+}
+
+pkill busybox
+echo "update CONFIG set VALUESTRING='0' where KEYSTRING='GPRS.Enable';" | sqlite3 -cmd ".open /etc/OpenBTS/OpenBTS.db"
+
+until [ -z "$1" ]
+  do
+    case $1 in
+    "-V")
+        echo "==================== Show DEBUG record and log to file ===================="
+        /bin/busybox syslogd -nSO /proc/1/fd/1 &
+        shift
+            ;;
+    "-GPRS")
+        echo "==================== config GPRS.Enable once ===================="
+        echo "update CONFIG set VALUESTRING='1' where KEYSTRING='GPRS.Enable';" | sqlite3 -cmd ".open /etc/OpenBTS/OpenBTS.db"
+        ### if config GPRS.Enable 1
+        iptables-restore < /usr/local/src/openbts/apps/iptables.rules
+        shift
+            ;;
+    "-custom")
+        echo "==================== config recommend value ===================="
+        echo "update CONFIG set VALUESTRING='0' where KEYSTRING='Control.LUR.OpenRegistration';" | sqlite3 -cmd ".open /etc/OpenBTS/OpenBTS.db"
+        echo "update CONFIG set VALUESTRING='8.8.8.8' where KEYSTRING='GGSN.DNS';" | sqlite3 -cmd ".open /etc/OpenBTS/OpenBTS.db"
+        echo "update CONFIG set VALUESTRING='0' where KEYSTRING='GGSN.Firewall.Enable';" | sqlite3 -cmd ".open /etc/OpenBTS/OpenBTS.db"
+        echo "update CONFIG set VALUESTRING='external' where KEYSTRING='TRX.Reference';" | sqlite3 -cmd ".open /etc/OpenBTS/OpenBTS.db"
+        # smqueue
+        echo "update CONFIG set VALUESTRING='DEBUG' where KEYSTRING='Log.Level';" | sqlite3 -cmd ".open /etc/OpenBTS/smqueue.db"
+	echo "Set recommend values success !"
+        exit
+	    ;;
+    "-h")
+        print_help
+        exit
+	    ;;
+    *)  # default
+        print_help
+        echo "Unknown option $1"
+        exit
+            ;;
+    esac
+  done
+
+echo "================================= stopUSRP ================================="
+service asterisk stop
+
+pkill smqueue
+pkill sipauthserve
+pkill transceiver
+pkill OpenBTS
+
+rm /var/run/OpenBTS.pid
+
+#==
+
+echo "================================= startUSRP ================================="
+
+uhd_usrp_probe
+if [ $? -ne 0 ]; then exit; fi
+
+service asterisk start
+
+/usr/local/src/smqueue/smqueue/smqueue &
+
+echo "#!/bin/bash" > /tmp/c.usrpactions
+echo cd /usr/local/src/subscriberRegistry/apps >> /tmp/c.usrpactions
+echo ./sipauthserve >> /tmp/c.usrpactions
+
+echo "#!/bin/bash" > /tmp/d.usrpactions
+echo cd /usr/local/src/openbts/apps >> /tmp/d.usrpactions
+echo "./OpenBTS">> /tmp/d.usrpactions
+
+chmod +x /tmp/*.usrpactions
+
+/tmp/c.usrpactions &
+/tmp/d.usrpactions &
+
+sleep 15
+echo "/usr/local/src/openbts/apps/OpenBTSCLI"
+/usr/local/src/openbts/apps/OpenBTSCLI

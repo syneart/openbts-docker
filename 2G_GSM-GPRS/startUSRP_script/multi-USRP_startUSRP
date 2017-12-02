@@ -1,0 +1,75 @@
+#!/bin/bash
+
+intExp="^-?\d+$";
+exp=${intExp};
+if [ $# != 2 ]; then
+    echo wrong arg nums, please input one arg
+    exit 1
+fi
+
+case $1 in
+"-device")
+    exp=${intExp}
+        ;;
+*)
+    echo option shuld be -device
+    exit 1
+        ;;
+esac
+
+if [ `echo $2 | grep -P "${exp}" | wc -l` == 1  ]; then
+    test "$2" -ge `uhd_find_devices | grep -o "UHD Device" | wc -l`
+    if [ $? -eq 0 ]; then
+        echo wrong device no
+        exit 0
+    fi
+    test "$2" -lt 0
+    if [ $? -eq 0 ]; then
+        echo wrong device no
+        exit 0
+    fi
+else
+    echo not num
+    exit 1
+fi
+
+device_no=$[$2 + 1];
+uhd_type=`uhd_find_devices | sed -n 's/type:/ /p'`;
+if [ `echo $uhd_type | awk '{print $"'$device_no'"}'` != 'b200' ]; then
+    echo "Device" ${device_no} "type is not b200 !"
+    exit
+fi
+
+uhd_serial=`uhd_find_devices | sed -n 's/serial:/ /p'`
+get_uhd_serial=`echo $uhd_serial | awk '{print $"'$device_no'"}'`
+
+transceiver_path=/usr/local/src/public/openbts/trunk/Transceiver52M/transceiver_usrp_with_serial
+
+echo "#!/bin/bash" > ${transceiver_path}
+echo "/usr/local/src/public/openbts/trunk/Transceiver52M/transceiver --args serial=${get_uhd_serial}" >> ${transceiver_path}
+chmod +x ${transceiver_path}
+uhd_usrp_probe --args serial=${get_uhd_serial}
+
+service asterisk start
+#echo "#!/bin/bash" > /tmp/a.usrpactions
+#echo asterisk -r >> /tmp/a.usrpactions
+
+#echo "#!/bin/bash" > /tmp/b.usrpactions
+#echo asterisk -vvvgc >> /tmp/b.usrpactions
+
+echo "#!/bin/bash" > /tmp/c.usrpactions
+echo cd /usr/local/src/subscriberRegistry/apps >> /tmp/c.usrpactions
+echo ./sipauthserve >> /tmp/c.usrpactions
+
+echo "#!/bin/bash" > /tmp/d.usrpactions
+echo cd /usr/local/src/public/openbts/trunk/apps >> /tmp/d.usrpactions
+echo "./OpenBTS">> /tmp/d.usrpactions
+
+chmod +x /tmp/*.usrpactions
+
+#start /tmp/a.usrpactions
+#start /tmp/b.usrpactions
+/tmp/c.usrpactions &
+/tmp/d.usrpactions &
+/usr/local/src/public/openbts/trunk/apps/OpenBTSCLI
+
